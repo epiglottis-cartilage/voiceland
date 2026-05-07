@@ -1,21 +1,138 @@
 use crate::{Result, app::App};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::{
+    collections::VecDeque,
+    iter::repeat,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::sync::mpsc;
 
+const SAMPLE_RATE: u32 = 35000;
+const CHANNELS: u16 = 1;
+const FRAME_MS: u64 = 10;
+const SAMPLES_PER_FRAME: usize = (SAMPLE_RATE * CHANNELS as u32 * FRAME_MS as u32 / 1000) as usize;
+
 pub struct AudioApp {
-    // audio handling fields
-    record_tx: mpsc::Sender<Vec<u8>>,
+    _input_stream: cpal::Stream,
+    _output_stream: cpal::Stream,
+    playback_buffer: Arc<Mutex<VecDeque<f32>>>,
 }
+
 impl AudioApp {
-    pub async fn new(tx: mpsc::Sender<String>, record_tx: mpsc::Sender<Vec<u8>>) -> Result<Self> {
-        // initialize audio handling
-        tx.send("Audio initialized".to_string()).await?;
-        Ok(Self { record_tx })
+    pub async fn new(
+        log_tx: mpsc::Sender<String>,
+        record_tx: mpsc::Sender<Vec<u8>>,
+    ) -> Result<Self> {
+        let host = cpal::default_host();
+
+        // --- Input (microphone) ---
+        let input_device = host
+            .default_input_device()
+            .ok_or("No default input device")?;
+        let input_config = cpal::StreamConfig {
+            channels: CHANNELS,
+            sample_rate: SAMPLE_RATE.into(),
+            buffer_size: cpal::BufferSize::Default,
+        };
+
+        let log_err = log_tx.clone();
+        let mut sample_buffer: Vec<f32> = Vec::new();
+
+        let input_stream = input_device.build_input_stream(
+            &input_config,
+            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                sample_buffer.extend_from_slice(data);
+                while sample_buffer.len() >= SAMPLES_PER_FRAME {
+                    let frame: Vec<f32> = sample_buffer.drain(..SAMPLES_PER_FRAME).collect();
+                    let bytes: Vec<u8> = frame.iter().flat_map(|s| s.to_le_bytes()).collect();
+                    let _ = record_tx.try_send(bytes);
+                }
+            },
+            move |err| {
+                let _ = log_err.try_send(format!("Audio input error: {}", err));
+            },
+            None,
+        )?;
+
+        // --- Output (speaker) ---
+        let output_device = host
+            .default_output_device()
+            .ok_or("No default output device")?;
+        let output_config = cpal::StreamConfig {
+            channels: CHANNELS,
+            sample_rate: SAMPLE_RATE.into(),
+            buffer_size: cpal::BufferSize::Default,
+        };
+
+        let playback_buffer: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::new()));
+        let playback_buffer_clone = playback_buffer.clone();
+
+        let log_err = log_tx.clone();
+        let output_stream = output_device.build_output_stream(
+            &output_config,
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                let mut pb = playback_buffer_clone.lock().unwrap();
+                let len = data.len().min(pb.len());
+                data.iter_mut()
+                    .zip(pb.drain(..len).chain(repeat(0.0)))
+                    .for_each(|(d, p)| *d = p);
+            },
+            move |err| {
+                let _ = log_err.try_send(format!("Audio output error: {}", err));
+            },
+            None,
+        )?;
+
+        input_stream.play()?;
+        output_stream.play()?;
+        log_tx.send("Audio initialized".to_string()).await?;
+
+        Ok(Self {
+            _input_stream: input_stream,
+            _output_stream: output_stream,
+            playback_buffer,
+        })
     }
 
     pub async fn run(&mut self, app: &App) {
-        // main audio processing loop
+        let mut interval = tokio::time::interval(Duration::from_millis(FRAME_MS));
+
         loop {
-            app;
+            if !app.running.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+
+            interval.tick().await;
+
+            let mut mixed = vec![0.0f32; SAMPLES_PER_FRAME];
+            let mut has_data = false;
+
+            let peers: tokio::sync::RwLockReadGuard<'_, Vec<crate::peer::Peer>> =
+                app.peers.read().await;
+            for peer in peers.iter() {
+                if let Some(frame_bytes) = peer.try_pop_voice() {
+                    has_data = true;
+                    let volume =
+                        peer.volume.load(std::sync::atomic::Ordering::Relaxed) as f32 / 255.0;
+
+                    for (i, chunk) in frame_bytes
+                        .chunks_exact(4)
+                        .enumerate()
+                        .take(SAMPLES_PER_FRAME)
+                    {
+                        let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                        mixed[i] += sample * volume;
+                    }
+                }
+            }
+            drop(peers);
+
+            if has_data {
+                let mut pb = self.playback_buffer.lock().unwrap();
+
+                pb.extend(&mixed);
+            }
         }
     }
 }

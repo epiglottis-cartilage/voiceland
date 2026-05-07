@@ -7,9 +7,11 @@ pub struct NetApp {
     local_name: String,
     peers: Vec<SocketAddr>,
     record_rx: mpsc::Receiver<Vec<u8>>,
+    log_tx: mpsc::Sender<String>,
+    buffer_len: u8,
 }
 impl NetApp {
-    const PREFIX: &'static [u8] = b"VOICELAND\n";
+    const PREFIX: &'static [u8] = b"VLAND\n";
 
     pub async fn new(
         config: &Config,
@@ -31,20 +33,24 @@ impl NetApp {
                 .map(|addr| (*addr, config.port).into())
                 .collect(),
             record_rx,
+            log_tx: tx,
+            buffer_len: config.buffer_len as u8,
         })
     }
 
     pub async fn run(&mut self, app: &App) {
-        let mut buf = [0; 1536];
+        let mut buf = [0; 3000];
         loop {
             tokio::select! {
                 Some(voice_data) = self.record_rx.recv() => {
+                    // println!("Recorded frame, sent to peers");
                     self.send_voice(&voice_data).await.unwrap();
                 },
                 result = self.socket.recv_from(&mut buf) => {
                     if let Ok((len, addr)) = result {
                         let data = &buf[..len];
                         if data.starts_with(Self::PREFIX) {
+                            // println!("Received packet");
                             let name_len = data[Self::PREFIX.len()] as usize;
                             // let name = String::from_utf8_lossy(
                             //     &data[Self::PREFIX.len() + 1..Self::PREFIX.len() + 1 + name_len],
@@ -57,26 +63,27 @@ impl NetApp {
                                 let peers = app.peers.read().await;
                                 idx = peers.binary_search_by_key(&addr, |p| p.addr);
                                 if let Ok(idx) = idx {
-                                    peers[idx].receive_voice(voice_data).await;
+                                    peers[idx].receive_voice(voice_data, self.buffer_len);
                                     continue;
                                 }
                             }
                             {
                                 let mut peers = app.peers.write().await;
                                 if let Err(idx) = idx {
+                                    let name = String::from_utf8_lossy(
+                                                &data[Self::PREFIX.len() + 1
+                                                    ..Self::PREFIX.len() + 1 + name_len],
+                                            ).to_string();
+                                    self.log_tx.send(format!("New peer: {} ({})", name, addr)).await.unwrap();
                                     peers.insert(
                                         idx,
                                         crate::peer::Peer::new(
-                                            String::from_utf8_lossy(
-                                                &data[Self::PREFIX.len() + 1
-                                                    ..Self::PREFIX.len() + 1 + name_len],
-                                            )
-                                            .to_string(),
+                                            name,
                                             addr,
                                         ),
                                     );
                                     self.add_peer(addr).await;
-                                    peers[idx].receive_voice(voice_data).await;
+                                    peers[idx].receive_voice(voice_data, self.buffer_len);
                                 }
                             }
                         }

@@ -9,8 +9,7 @@ description = "A voice communication binary for local area networks."
 tokio = { version = "1.44", features = ["full"] }
 
 # Audio
-# cpal = "0.17.3"
-# opus = "0.3"
+cpal = "0.17.3"
 
 # TUI
 ratatui = { version = "0.30" }

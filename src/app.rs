@@ -29,21 +29,24 @@ impl App {
         self: Arc<Self>,
         (mut net_app, mut ui_app, mut audio_app): (NetApp, UiApp, AudioApp),
     ) {
-        let app = self.clone();
-        let net_handle = tokio::spawn(async move {
-            net_app.run(&*app).await;
-        });
+        let mut join_set = tokio::task::JoinSet::new();
 
         let app = self.clone();
-        let ui_handle = tokio::spawn(async move {
+        join_set.spawn(async move {
             ui_app.run(&*app).await;
         });
 
         let app = self.clone();
-        let audio_handle = tokio::spawn(async move {
+        join_set.spawn(async move {
+            net_app.run(&*app).await;
+        });
+
+        let app = self.clone();
+        join_set.spawn(async move {
             audio_app.run(&*app).await;
         });
 
-        let _ = tokio::join!(net_handle, ui_handle, audio_handle);
+        join_set.join_next().await;
+        join_set.shutdown().await;
     }
 }

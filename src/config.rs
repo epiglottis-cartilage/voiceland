@@ -7,6 +7,7 @@ pub struct Config {
     pub port: u16,
     pub local_name: String,
     pub peers: Vec<IpAddr>,
+    pub buffer_len: u8,
 }
 
 impl Config {

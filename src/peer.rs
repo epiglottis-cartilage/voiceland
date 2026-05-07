@@ -1,12 +1,13 @@
-use std::{net::SocketAddr, sync::atomic::AtomicU8};
-use tokio::sync::Mutex;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicU16;
+use std::{collections::VecDeque, net::SocketAddr};
 
 #[derive(Debug)]
 pub struct Peer {
     pub name: String,
     pub addr: SocketAddr,
-    pub volume: AtomicU8, // 0-255%,
-    voice: Mutex<Option<Vec<u8>>>,
+    pub volume: AtomicU16,
+    voice: Mutex<VecDeque<Vec<u8>>>,
 }
 
 impl Peer {
@@ -14,11 +15,20 @@ impl Peer {
         Self {
             name,
             addr,
-            volume: AtomicU8::new(100),
-            voice: Mutex::new(None),
+            volume: AtomicU16::new(1000),
+            voice: Mutex::new(VecDeque::new()),
         }
     }
-    pub async fn receive_voice(&self, data: Vec<u8>) {
-        self.voice.lock().await.replace(data);
+
+    pub fn receive_voice(&self, data: Vec<u8>, ttl: u8) {
+        let mut queue = self.voice.lock().unwrap();
+        queue.push_back(data);
+        while queue.len() > ttl as usize {
+            queue.pop_front();
+        }
+    }
+
+    pub fn try_pop_voice(&self) -> Option<Vec<u8>> {
+        self.voice.lock().unwrap().pop_front()
     }
 }
