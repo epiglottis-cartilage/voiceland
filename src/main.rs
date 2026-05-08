@@ -4,6 +4,7 @@ pub use error::Result;
 
 mod app;
 mod audio;
+mod codec;
 mod config;
 mod error;
 mod net;

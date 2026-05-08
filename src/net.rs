@@ -39,7 +39,7 @@ impl NetApp {
     }
 
     pub async fn run(&mut self, app: &App) {
-        let mut buf = [0; 3000];
+        let mut buf = [0; 1500];
         loop {
             tokio::select! {
                 Some(voice_data) = self.record_rx.recv() => {

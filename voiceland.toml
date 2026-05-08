@@ -1,4 +1,4 @@
 port = 6411
-local_name = "Type here"
-peers = ["10.161.0.1"]
-buffer_len = 5
+local_name = "Y_zl"
+peers = ["10.161.1.42", "10.161.1.43"]
+buffer_len = 2

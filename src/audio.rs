@@ -1,4 +1,4 @@
-use crate::{Result, app::App};
+use crate::{Result, app::App, codec::Codec};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::{
     collections::VecDeque,
@@ -8,15 +8,18 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-const SAMPLE_RATE: u32 = 35000;
+use crate::codec::{SAMPLE_RATE as CODEC_SAMPLE_RATE, SAMPLES_PER_FRAME as CODEC_SAMPLES};
+
+const SAMPLE_RATE: u32 = CODEC_SAMPLE_RATE as u32;
 const CHANNELS: u16 = 1;
 const FRAME_MS: u64 = 10;
-const SAMPLES_PER_FRAME: usize = (SAMPLE_RATE * CHANNELS as u32 * FRAME_MS as u32 / 1000) as usize;
+const SAMPLES_PER_FRAME: usize = CODEC_SAMPLES;
 
 pub struct AudioApp {
     _input_stream: cpal::Stream,
     _output_stream: cpal::Stream,
     playback_buffer: Arc<Mutex<VecDeque<f32>>>,
+    codec: Arc<Mutex<Codec>>,
 }
 
 impl AudioApp {
@@ -24,6 +27,7 @@ impl AudioApp {
         log_tx: mpsc::Sender<String>,
         record_tx: mpsc::Sender<Vec<u8>>,
     ) -> Result<Self> {
+        let codec = Arc::new(Mutex::new(Codec::new()?));
         let host = cpal::default_host();
 
         // --- Input (microphone) ---
@@ -38,6 +42,7 @@ impl AudioApp {
 
         let log_err = log_tx.clone();
         let mut sample_buffer: Vec<f32> = Vec::new();
+        let codec_enc = codec.clone();
 
         let input_stream = input_device.build_input_stream(
             &input_config,
@@ -45,8 +50,11 @@ impl AudioApp {
                 sample_buffer.extend_from_slice(data);
                 while sample_buffer.len() >= SAMPLES_PER_FRAME {
                     let frame: Vec<f32> = sample_buffer.drain(..SAMPLES_PER_FRAME).collect();
-                    let bytes: Vec<u8> = frame.iter().flat_map(|s| s.to_le_bytes()).collect();
-                    let _ = record_tx.try_send(bytes);
+                    if let Ok(mut c) = codec_enc.lock() {
+                        if let Ok(encoded) = c.encode(&frame) {
+                            let _ = record_tx.try_send(encoded.to_vec());
+                        }
+                    }
                 }
             },
             move |err| {
@@ -86,12 +94,13 @@ impl AudioApp {
 
         input_stream.play()?;
         output_stream.play()?;
-        log_tx.send("Audio initialized".to_string()).await?;
+        log_tx.send(format!("Audio initialized ({})", Codec::config_summary())).await?;
 
         Ok(Self {
             _input_stream: input_stream,
             _output_stream: output_stream,
             playback_buffer,
+            codec,
         })
     }
 
@@ -116,13 +125,12 @@ impl AudioApp {
                     let volume =
                         peer.volume.load(std::sync::atomic::Ordering::Relaxed) as f32 / 255.0;
 
-                    for (i, chunk) in frame_bytes
-                        .chunks_exact(4)
-                        .enumerate()
-                        .take(SAMPLES_PER_FRAME)
-                    {
-                        let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                        mixed[i] += sample * volume;
+                    if let Ok(mut c) = self.codec.lock() {
+                        if let Ok(decoded) = c.decode(&frame_bytes) {
+                            for (i, sample) in decoded.iter().enumerate().take(SAMPLES_PER_FRAME) {
+                                mixed[i] += sample * volume;
+                            }
+                        }
                     }
                 }
             }
@@ -130,7 +138,6 @@ impl AudioApp {
 
             if has_data {
                 let mut pb = self.playback_buffer.lock().unwrap();
-
                 pb.extend(&mixed);
             }
         }
