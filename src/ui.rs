@@ -1,5 +1,5 @@
 use crate::app::App;
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -57,22 +57,14 @@ impl UiApp {
                                     }
                                 }
                             }
-                            Ok(false) => {
-                                if let Ok(event) = event::read() {
-                                    if self.handle_event(app, event).await {
-                                        break;
-                                    }
-                                }
-                            }
+                            Ok(false) => {}
                             _ => {
                                 unreachable!();
                             }
                         }
-
                         terminal.draw(|f| {
                             self.render(f, app);
                         }).unwrap();
-
                     }else{
                         unreachable!();
                     }
@@ -85,19 +77,14 @@ impl UiApp {
 
     pub fn render(&self, f: &mut ratatui::Frame, app: &App) {
         let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(10), Constraint::Length(8)])
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(70), Constraint::Fill(1)])
             .split(f.area());
 
         self.render_peer_list(f, app, chunks[0]);
         self.render_log(f, chunks[1]);
     }
     fn render_peer_list(&self, f: &mut Frame, app: &App, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(area);
-
         let selected_idx = self.selected_peer;
 
         let peers = app.peers.try_read();
@@ -110,22 +97,19 @@ impl UiApp {
                     let volume_bar = Self::render_volume_bar(
                         peer.volume.load(std::sync::atomic::Ordering::Relaxed),
                     );
-
-                    let mut spans = vec![Span::raw(format!("{}: {}", peer.name, peer.addr))];
-                    if is_selected {
-                        spans.insert(0, Span::styled("> ", Color::Yellow));
-                    } else {
-                        spans.insert(0, Span::raw("  "));
-                    }
-
                     let text = Text::from(vec![
-                        Line::from(spans),
+                        Line::from(Span::raw(format!(" {}: {}", peer.name, peer.addr.ip()))),
                         Line::from(vec![
-                            Span::raw("    Volume: "),
+                            if is_selected {
+                                Span::styled("> ", Color::Yellow)
+                            } else {
+                                Span::raw("  ")
+                            },
+                            Span::raw("  Volume: "),
                             Span::styled(volume_bar, Color::Yellow),
                             Span::raw(format!(
-                                " {:.0}%",
-                                peer.volume.load(std::sync::atomic::Ordering::Relaxed)
+                                " {:04}%",
+                                peer.volume.load(std::sync::atomic::Ordering::Relaxed) / 10
                             )),
                         ]),
                     ]);
@@ -140,21 +124,25 @@ impl UiApp {
         let peer_list =
             List::new(peer_items).block(Block::default().title("Peers").borders(Borders::ALL));
 
-        f.render_widget(peer_list, chunks[0]);
+        f.render_widget(peer_list, area);
+    }
+
+    fn render_log(&self, f: &mut Frame, area: Rect) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(6), Constraint::Fill(1)])
+            .split(area);
 
         let local_info = Text::from(vec![
             Line::from("Controls:"),
-            Line::from("  Ctrl+Q - Quit"),
+            Line::from("  Ctrl+C - Quit"),
             Line::from("  ↑/↓ - Select peer"),
             Line::from("  ←/→ - Adjust volume"),
         ]);
 
         let local_widget = Paragraph::new(local_info)
             .block(Block::default().title("Status").borders(Borders::ALL));
-        f.render_widget(local_widget, chunks[1]);
-    }
 
-    fn render_log(&self, f: &mut Frame, area: Rect) {
         let app_logs = self.logs.clone();
         let log_text = if app_logs.is_empty() {
             Text::from("No messages yet...")
@@ -171,11 +159,12 @@ impl UiApp {
             .block(Block::default().title("Log").borders(Borders::ALL))
             .wrap(Wrap { trim: true });
 
-        f.render_widget(log_widget, area);
+        f.render_widget(local_widget, chunks[0]);
+        f.render_widget(log_widget, chunks[1]);
     }
 
-    fn render_volume_bar(volume: u8) -> String {
-        let filled = (volume as f32 / 255.0 * 10.0).round() as usize;
+    fn render_volume_bar(volume: u16) -> String {
+        let filled = (volume / 100) as usize;
         let empty = 20usize.saturating_sub(filled);
         format!("{}{}", "█".repeat(filled), "░".repeat(empty))
     }
@@ -183,28 +172,28 @@ impl UiApp {
     async fn handle_event(&mut self, app: &App, event: Event) -> bool {
         match event {
             Event::Key(key) => match key.code {
-                KeyCode::Char('q') | KeyCode::Char('Q') => {
+                KeyCode::Char('c') | KeyCode::Char('C') => {
                     if key.modifiers.contains(KeyModifiers::CONTROL) {
                         return true;
                     }
                 }
-                KeyCode::Up => {
+                KeyCode::Up if key.kind == KeyEventKind::Press => {
                     self.selected_peer = self.selected_peer.saturating_sub(1);
                 }
-                KeyCode::Down => {
+                KeyCode::Down if key.kind == KeyEventKind::Press => {
                     let peers = app.peers.read().await;
-                    self.selected_peer = self
-                        .selected_peer
-                        .min(peers.len().saturating_sub(1))
-                        .saturating_sub(1);
+                    self.selected_peer = (self.selected_peer + 1).min(peers.len())
                 }
                 KeyCode::Left => {
                     let peers = app.peers.read().await;
                     self.selected_peer = self.selected_peer.min(peers.len().saturating_sub(1));
 
                     if let Some(peer) = peers.get(self.selected_peer) {
-                        peer.volume
-                            .fetch_sub(5, std::sync::atomic::Ordering::Relaxed);
+                        let volume = peer.volume.load(std::sync::atomic::Ordering::Relaxed);
+                        peer.volume.store(
+                            volume.saturating_sub(10),
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
                     }
                 }
                 KeyCode::Right => {
@@ -212,8 +201,11 @@ impl UiApp {
                     self.selected_peer = self.selected_peer.min(peers.len().saturating_sub(1));
 
                     if let Some(peer) = peers.get(self.selected_peer) {
-                        peer.volume
-                            .fetch_add(5, std::sync::atomic::Ordering::Relaxed);
+                        let volume = peer.volume.load(std::sync::atomic::Ordering::Relaxed);
+                        peer.volume.store(
+                            volume.saturating_add(10),
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
                     }
                 }
                 _ => {}
