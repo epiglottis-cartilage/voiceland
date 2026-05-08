@@ -1,3 +1,4 @@
 port = 6411
 local_name = "Type here"
 peers = ["10.161.0.1"]
+buffer_len = 5
