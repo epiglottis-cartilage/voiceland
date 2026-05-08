@@ -43,18 +43,13 @@ impl NetApp {
         loop {
             tokio::select! {
                 Some(voice_data) = self.record_rx.recv() => {
-                    // println!("Recorded frame, sent to peers");
                     self.send_voice(&voice_data).await.unwrap();
                 },
                 result = self.socket.recv_from(&mut buf) => {
                     if let Ok((len, addr)) = result {
                         let data = &buf[..len];
                         if data.starts_with(Self::PREFIX) {
-                            // println!("Received packet");
                             let name_len = data[Self::PREFIX.len()] as usize;
-                            // let name = String::from_utf8_lossy(
-                            //     &data[Self::PREFIX.len() + 1..Self::PREFIX.len() + 1 + name_len],
-                            // );
                             let voice_data = data[Self::PREFIX.len() + 1 + name_len..].to_vec();
 
                             // if pear exist
@@ -94,7 +89,9 @@ impl NetApp {
     }
 
     pub async fn add_peer(&mut self, addr: SocketAddr) {
-        self.peers.push(addr);
+        if !self.peers.contains(&addr) {
+            self.peers.push(addr);
+        }
     }
 
     pub async fn send_voice(&mut self, voice_data: &[u8]) -> Result<()> {

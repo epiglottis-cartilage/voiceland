@@ -17,16 +17,9 @@ pub struct UiApp {
     logs: VecDeque<String>,
     log_rx: mpsc::Receiver<String>,
 }
-// impl Drop for UiApp {
-//     fn drop(&mut self) {
-//         // Clean up UI resources if needed
-//         ratatui::restore();
-//     }
-// }
 impl UiApp {
     pub fn new(log_rx: mpsc::Receiver<String>) -> Self {
         Self {
-            // terminal: ratatui::init(),
             selected_peer: 0,
             logs: VecDeque::new(),
             log_rx,
@@ -78,7 +71,7 @@ impl UiApp {
     pub fn render(&self, f: &mut ratatui::Frame, app: &App) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(70), Constraint::Fill(1)])
+            .constraints([Constraint::Percentage(60), Constraint::Fill(1)])
             .split(f.area());
 
         self.render_peer_list(f, app, chunks[0]);
@@ -130,12 +123,13 @@ impl UiApp {
     fn render_log(&self, f: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(6), Constraint::Fill(1)])
+            .constraints([Constraint::Length(7), Constraint::Fill(1)])
             .split(area);
 
         let local_info = Text::from(vec![
             Line::from("Controls:"),
             Line::from("  Ctrl+C - Quit"),
+            Line::from("  Ctrl+R - Refresh peers"),
             Line::from("  ↑/↓ - Select peer"),
             Line::from("  ←/→ - Adjust volume"),
         ]);
@@ -149,7 +143,7 @@ impl UiApp {
         } else {
             let lines: Vec<Line> = app_logs
                 .iter()
-                .take(10)
+                .take(15)
                 .map(|msg| Line::from(msg.as_str()))
                 .collect();
             Text::from(lines)
@@ -175,6 +169,11 @@ impl UiApp {
                 KeyCode::Char('c') | KeyCode::Char('C') => {
                     if key.modifiers.contains(KeyModifiers::CONTROL) {
                         return true;
+                    }
+                }
+                KeyCode::Char('r') | KeyCode::Char('R') => {
+                    if key.modifiers.contains(KeyModifiers::CONTROL) {
+                        app.peers.write().await.clear();
                     }
                 }
                 KeyCode::Up if key.kind == KeyEventKind::Press => {
