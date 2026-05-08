@@ -3,7 +3,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::{
     collections::VecDeque,
     iter::repeat,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::AtomicU16},
     time::Duration,
 };
 use tokio::sync::mpsc;
@@ -26,6 +26,7 @@ impl AudioApp {
     pub async fn new(
         log_tx: mpsc::Sender<String>,
         record_tx: mpsc::Sender<Vec<u8>>,
+        volume: Arc<AtomicU16>,
     ) -> Result<Self> {
         let codec = Arc::new(Mutex::new(Codec::new()?));
         let host = cpal::default_host();
@@ -49,7 +50,9 @@ impl AudioApp {
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
                 sample_buffer.extend_from_slice(data);
                 while sample_buffer.len() >= SAMPLES_PER_FRAME {
-                    let frame: Vec<f32> = sample_buffer.drain(..SAMPLES_PER_FRAME).collect();
+                    let mut frame: Vec<f32> = sample_buffer.drain(..SAMPLES_PER_FRAME).collect();
+                    let v = volume.load(std::sync::atomic::Ordering::Relaxed) as f32 / 100.;
+                    frame.iter_mut().for_each(|s| *s *= v);
                     if let Ok(mut c) = codec_enc.lock() {
                         if let Ok(encoded) = c.encode(&frame) {
                             let _ = record_tx.try_send(encoded.to_vec());
@@ -94,7 +97,9 @@ impl AudioApp {
 
         input_stream.play()?;
         output_stream.play()?;
-        log_tx.send(format!("Audio initialized ({})", Codec::config_summary())).await?;
+        log_tx
+            .send(format!("Audio initialized ({})", Codec::config_summary()))
+            .await?;
 
         Ok(Self {
             _input_stream: input_stream,

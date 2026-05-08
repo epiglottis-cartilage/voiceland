@@ -19,14 +19,11 @@ impl NetApp {
         record_rx: mpsc::Receiver<Vec<u8>>,
     ) -> Result<Self> {
         let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, config.port)).await?;
-        tx.send(format!(
-            "{} listen on port {}",
-            config.local_name, config.port
-        ))
-        .await?;
+        tx.send(format!("{} listen on port {}", config.name, config.port))
+            .await?;
         Ok(Self {
             socket,
-            local_name: config.local_name.clone(),
+            local_name: config.name.clone(),
             peers: config
                 .peers
                 .iter()

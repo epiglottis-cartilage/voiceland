@@ -1,4 +1,4 @@
-port = 6411
-local_name = "Y_zl"
+port = 6412
+name = "epiglottis"
 peers = ["10.161.1.42", "10.161.1.43"]
-buffer_len = 2
+buffer_len = 5

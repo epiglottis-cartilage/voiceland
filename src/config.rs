@@ -5,7 +5,7 @@ use std::net::IpAddr;
 #[derive(Deserialize)]
 pub struct Config {
     pub port: u16,
-    pub local_name: String,
+    pub name: String,
     pub peers: Vec<IpAddr>,
     pub buffer_len: u8,
 }

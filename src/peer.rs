@@ -15,7 +15,7 @@ impl Peer {
         Self {
             name,
             addr,
-            volume: AtomicU16::new(1000),
+            volume: AtomicU16::new(100),
             voice: Mutex::new(VecDeque::new()),
         }
     }

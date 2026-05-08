@@ -13,14 +13,14 @@ use tokio::sync::mpsc;
 #[derive(Debug)]
 pub struct UiApp {
     // terminal: ratatui::DefaultTerminal,
-    selected_peer: usize,
+    selected: usize,
     logs: VecDeque<String>,
     log_rx: mpsc::Receiver<String>,
 }
 impl UiApp {
     pub fn new(log_rx: mpsc::Receiver<String>) -> Self {
         Self {
-            selected_peer: 0,
+            selected: 0,
             logs: VecDeque::new(),
             log_rx,
         }
@@ -78,40 +78,53 @@ impl UiApp {
         self.render_log(f, chunks[1]);
     }
     fn render_peer_list(&self, f: &mut Frame, app: &App, area: Rect) {
-        let selected_idx = self.selected_peer;
+        let selected_idx = self.selected;
 
         let peers = app.peers.try_read();
-        let peer_items: Vec<ListItem> = if let Ok(peers) = peers {
-            peers
-                .iter()
-                .enumerate()
-                .map(|(i, peer)| {
-                    let is_selected = i == selected_idx;
-                    let volume_bar = Self::render_volume_bar(
-                        peer.volume.load(std::sync::atomic::Ordering::Relaxed),
-                    );
-                    let text = Text::from(vec![
-                        Line::from(Span::raw(format!(" {}: {}", peer.name, peer.addr.ip()))),
-                        Line::from(vec![
-                            if is_selected {
-                                Span::styled("> ", Color::Yellow)
-                            } else {
-                                Span::raw("  ")
-                            },
-                            Span::raw("  Volume: "),
-                            Span::styled(volume_bar, Color::Yellow),
-                            Span::raw(format!(
-                                " {:04}%",
-                                peer.volume.load(std::sync::atomic::Ordering::Relaxed) / 10
-                            )),
-                        ]),
-                    ]);
+        let mut peer_items = vec![ListItem::new(Text::from(vec![
+            Line::from(Span::raw(format!(" {}", app.name))),
+            Line::from(vec![
+                if selected_idx == 0 {
+                    Span::styled("> ", Color::Yellow)
+                } else {
+                    Span::raw("  ")
+                },
+                Span::raw("  Volume: "),
+                Span::styled(
+                    Self::render_volume_bar(app.volume.load(std::sync::atomic::Ordering::Relaxed)/ 10)
+                        ,
+                    Color::Yellow,
+                ),
+                Span::raw(format!(
+                    " {:04}%",
+                    app.volume.load(std::sync::atomic::Ordering::Relaxed) / 10
+                )),
+            ]),
+        ]))];
+        if let Ok(peers) = peers {
+            peer_items.extend(peers.iter().enumerate().map(|(i, peer)| {
+                let is_selected = i + 1 == selected_idx;
+                let volume_bar =
+                    Self::render_volume_bar(peer.volume.load(std::sync::atomic::Ordering::Relaxed));
+                let text = Text::from(vec![
+                    Line::from(Span::raw(format!(" {}: {}", peer.name, peer.addr.ip()))),
+                    Line::from(vec![
+                        if is_selected {
+                            Span::styled("> ", Color::Yellow)
+                        } else {
+                            Span::raw("  ")
+                        },
+                        Span::raw("  Volume: "),
+                        Span::styled(volume_bar, Color::Yellow),
+                        Span::raw(format!(
+                            " {:04}%",
+                            peer.volume.load(std::sync::atomic::Ordering::Relaxed)
+                        )),
+                    ]),
+                ]);
 
-                    ListItem::new(text)
-                })
-                .collect()
-        } else {
-            vec![]
+                ListItem::new(text)
+            }));
         };
 
         let peer_list =
@@ -158,7 +171,7 @@ impl UiApp {
     }
 
     fn render_volume_bar(volume: u16) -> String {
-        let filled = (volume / 100) as usize;
+        let filled = (volume / 10) as usize;
         let empty = 20usize.saturating_sub(filled);
         format!("{}{}", "█".repeat(filled), "░".repeat(empty))
     }
@@ -177,17 +190,22 @@ impl UiApp {
                     }
                 }
                 KeyCode::Up if key.kind == KeyEventKind::Press => {
-                    self.selected_peer = self.selected_peer.saturating_sub(1);
+                    self.selected = self.selected.saturating_sub(1);
                 }
                 KeyCode::Down if key.kind == KeyEventKind::Press => {
                     let peers = app.peers.read().await;
-                    self.selected_peer = (self.selected_peer + 1).min(peers.len())
+                    self.selected = (self.selected + 1).min(peers.len())
                 }
                 KeyCode::Left => {
                     let peers = app.peers.read().await;
-                    self.selected_peer = self.selected_peer.min(peers.len().saturating_sub(1));
-
-                    if let Some(peer) = peers.get(self.selected_peer) {
+                    self.selected = self.selected.min(peers.len());
+                    if self.selected == 0 {
+                        let volume = app.volume.load(std::sync::atomic::Ordering::Relaxed);
+                        app.volume.store(
+                            volume.saturating_sub(20),
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+                    } else if let Some(peer) = peers.get(self.selected - 1) {
                         let volume = peer.volume.load(std::sync::atomic::Ordering::Relaxed);
                         peer.volume.store(
                             volume.saturating_sub(10),
@@ -197,9 +215,15 @@ impl UiApp {
                 }
                 KeyCode::Right => {
                     let peers = app.peers.read().await;
-                    self.selected_peer = self.selected_peer.min(peers.len().saturating_sub(1));
+                    self.selected = self.selected.min(peers.len());
 
-                    if let Some(peer) = peers.get(self.selected_peer) {
+                    if self.selected == 0 {
+                        let volume = app.volume.load(std::sync::atomic::Ordering::Relaxed);
+                        app.volume.store(
+                            volume.saturating_add(20),
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+                    } else if let Some(peer) = peers.get(self.selected - 1) {
                         let volume = peer.volume.load(std::sync::atomic::Ordering::Relaxed);
                         peer.volume.store(
                             volume.saturating_add(10),
