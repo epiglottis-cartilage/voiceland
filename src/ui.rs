@@ -202,13 +202,13 @@ impl UiApp {
                     if self.selected == 0 {
                         let volume = app.volume.load(std::sync::atomic::Ordering::Relaxed);
                         app.volume.store(
-                            volume.saturating_sub(20),
+                            volume.saturating_sub(100),
                             std::sync::atomic::Ordering::Relaxed,
                         );
                     } else if let Some(peer) = peers.get(self.selected - 1) {
                         let volume = peer.volume.load(std::sync::atomic::Ordering::Relaxed);
                         peer.volume.store(
-                            volume.saturating_sub(10),
+                            volume.saturating_sub(2),
                             std::sync::atomic::Ordering::Relaxed,
                         );
                     }
@@ -220,13 +220,13 @@ impl UiApp {
                     if self.selected == 0 {
                         let volume = app.volume.load(std::sync::atomic::Ordering::Relaxed);
                         app.volume.store(
-                            volume.saturating_add(20),
+                            volume.saturating_add(100),
                             std::sync::atomic::Ordering::Relaxed,
                         );
                     } else if let Some(peer) = peers.get(self.selected - 1) {
                         let volume = peer.volume.load(std::sync::atomic::Ordering::Relaxed);
                         peer.volume.store(
-                            volume.saturating_add(10),
+                            volume.saturating_add(2),
                             std::sync::atomic::Ordering::Relaxed,
                         );
                     }

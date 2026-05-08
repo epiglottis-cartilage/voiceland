@@ -51,8 +51,10 @@ impl AudioApp {
                 sample_buffer.extend_from_slice(data);
                 while sample_buffer.len() >= SAMPLES_PER_FRAME {
                     let mut frame: Vec<f32> = sample_buffer.drain(..SAMPLES_PER_FRAME).collect();
+
                     let v = volume.load(std::sync::atomic::Ordering::Relaxed) as f32 / 100.;
                     frame.iter_mut().for_each(|s| *s *= v);
+
                     if let Ok(mut c) = codec_enc.lock() {
                         if let Ok(encoded) = c.encode(&frame) {
                             let _ = record_tx.try_send(encoded.to_vec());
