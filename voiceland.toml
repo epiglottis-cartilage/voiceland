@@ -1,8 +1,10 @@
+name = "-YOUR-NAME-"
+peers = ["127.0.0.1", "10.161.1.42"]
+
 port = 6413
 buffer_len = 5
-denoise = true
-name = "-YOUR NAME-"
-peers = ["127.0.0.1"]
+bitrate = 256000 # 8k - 512k
+denoise = false
 
 # Optional
-microphone_volume = 200
+microphone_volume = 150

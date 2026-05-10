@@ -6,7 +6,6 @@ use std::mem::MaybeUninit;
 pub const SAMPLE_RATE: usize = 48000;
 pub const FRAME_MS: usize = 10;
 pub const CHANNELS: usize = 1;
-const BITRATE_BPS: i32 = 512000;
 const USE_CBR: bool = false;
 const APPLICATION: Application = Application::Audio;
 
@@ -20,9 +19,9 @@ pub struct Encoder {
 }
 
 impl Encoder {
-    pub fn new(desoise: bool) -> Result<Self> {
+    pub fn new(desoise: bool, bitrate: u32) -> Result<Self> {
         let mut encoder = OpusEncoder::new(SAMPLE_RATE as i32, CHANNELS, APPLICATION)?;
-        encoder.bitrate_bps = BITRATE_BPS;
+        encoder.bitrate_bps = bitrate as _;
         encoder.use_cbr = USE_CBR;
         let denoiser = if desoise {
             Some(DenoiseState::new())
@@ -40,9 +39,9 @@ impl Encoder {
     pub fn encode(&mut self, pcm: &mut [f32; SAMPLES_PER_FRAME]) -> Result<&[u8]> {
         let len;
         if let Some(denoiser) = &mut self.denoiser {
-            let mut denoised_pcm = unsafe {
-                MaybeUninit::array_assume_init([MaybeUninit::uninit(); SAMPLES_PER_FRAME])
-            };
+            #[allow(invalid_value)]
+            let mut denoised_pcm: [f32; SAMPLES_PER_FRAME] =
+                unsafe { MaybeUninit::uninit().assume_init() };
             pcm.iter_mut().for_each(|x| *x *= 32768.);
             denoiser.process_frame(&mut denoised_pcm, pcm);
             denoised_pcm.iter_mut().for_each(|x| *x /= 32768.);
@@ -81,14 +80,4 @@ impl Decoder {
         assert_eq!(samples, SAMPLES_PER_FRAME);
         Ok(&*self.decode_buffer)
     }
-}
-
-pub fn config_summary() -> String {
-    format!(
-        "{} Hz, {}ch, {}ms, {} kbps",
-        SAMPLE_RATE,
-        CHANNELS,
-        FRAME_MS,
-        BITRATE_BPS / 1000,
-    )
 }

@@ -37,9 +37,13 @@ impl NetApp {
         })
     }
 
-    pub async fn run(&mut self, app: &App) {
+    pub async fn run(&mut self, app: &App) -> bool {
         let mut buf = [0; 1500];
         loop {
+            // if !app.running.load(std::sync::atomic::Ordering::Relaxed) {
+            //     break true;
+            // }
+
             tokio::select! {
                 Some(voice_data) = self.record_rx.recv() => {
                     self.send_voice(&voice_data).await.unwrap();
@@ -75,7 +79,9 @@ impl NetApp {
                                                 &data[Self::PREFIX.len() + 8 + 1
                                                     ..Self::PREFIX.len() + 8 + 1 + name_len],
                                             ).to_string();
-                                    self.log_tx.send(format!("New peer: {} ({})", name, addr)).await.unwrap();
+                                    if self.log_tx.send(format!("New peer: {} ({})", name, addr)).await.is_err(){
+                                        break false;
+                                    }
                                     peers.insert(
                                         idx,
                                         crate::peer::Peer::new(

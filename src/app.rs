@@ -7,7 +7,7 @@ use crate::{Result, audio::AudioApp, config::Config, net::NetApp, peer::Peer, ui
 use tokio::sync::RwLock;
 
 pub struct App {
-    pub running: AtomicBool,
+    // pub running: AtomicBool,
     pub peers: RwLock<Vec<Peer>>,
     pub name: String,
     /// 100 -> 100%
@@ -24,7 +24,7 @@ impl App {
         let audio_app = AudioApp::new(&config, log_tx.clone(), record_tx, volume.clone()).await?;
         Ok((
             Self {
-                running: AtomicBool::new(true),
+                // running: AtomicBool::new(true),
                 peers: RwLock::new(Vec::new()),
                 name: config.name,
                 volume,
@@ -36,25 +36,28 @@ impl App {
     pub async fn run(
         self: Arc<Self>,
         (mut net_app, mut ui_app, mut audio_app): (NetApp, UiApp, AudioApp),
-    ) {
+    ) -> bool {
         let mut join_set = tokio::task::JoinSet::new();
 
         let app = self.clone();
-        join_set.spawn(async move {
-            ui_app.run(&*app).await;
-        });
+        join_set.spawn(async move { ui_app.run(&*app).await });
 
         let app = self.clone();
-        join_set.spawn(async move {
-            net_app.run(&*app).await;
-        });
+        join_set.spawn(async move { net_app.run(&*app).await });
 
         let app = self.clone();
-        join_set.spawn(async move {
-            audio_app.run(&*app).await;
-        });
+        join_set.spawn(async move { audio_app.run(&*app).await });
 
-        join_set.join_next().await;
+        let restart;
+        match join_set.join_next().await {
+            Some(Ok(false)) => {
+                restart = false;
+            }
+            _ => {
+                restart = true;
+            }
+        }
         join_set.shutdown().await;
+        restart
     }
 }

@@ -25,13 +25,13 @@ impl UiApp {
             log_rx,
         }
     }
-    pub async fn run(&mut self, app: &App) {
+    pub async fn run(&mut self, app: &App) -> bool {
         let mut terminal = ratatui::init();
 
-        loop {
-            if !app.running.load(std::sync::atomic::Ordering::Relaxed) {
-                break;
-            }
+        let restart = loop {
+            // if !app.running.load(std::sync::atomic::Ordering::Relaxed) {
+            //     break;
+            // }
 
             tokio::select! {
                 Some(event) = self.log_rx.recv() => {
@@ -40,13 +40,14 @@ impl UiApp {
                         self.logs.pop_front();
                     }
                 }
-                tick = tokio::task::spawn(async {event::poll(Duration::from_millis(100))}) =>{
+                tick = tokio::task::spawn(async {event::poll(Duration::from_millis(100))}) => {
                     if let Ok(tick) = tick{
                         match tick {
                             Ok(true) => {
                                 if let Ok(event) = event::read() {
-                                    if self.handle_event(app, event).await {
-                                        break;
+                                    let quit = self.handle_event(app, event).await;
+                                    if let Some(restart) = quit{
+                                        break restart;
                                     }
                                 }
                             }
@@ -63,9 +64,11 @@ impl UiApp {
                     }
                 }
             }
-        }
+        };
 
         ratatui::restore();
+
+        restart
     }
 
     pub fn render(&self, f: &mut ratatui::Frame, app: &App) {
@@ -141,7 +144,7 @@ impl UiApp {
         let local_info = Text::from(vec![
             Line::from("Controls:"),
             Line::from("  Ctrl+C - Quit"),
-            Line::from("  Ctrl+R - Refresh peers"),
+            Line::from("  Ctrl+R - Reload"),
             Line::from("  ↑/↓ - Select peer"),
             Line::from("  ←/→ - Adjust volume"),
         ]);
@@ -175,17 +178,18 @@ impl UiApp {
         format!("{}{}", "█".repeat(filled), "░".repeat(empty))
     }
 
-    async fn handle_event(&mut self, app: &App, event: Event) -> bool {
+    async fn handle_event(&mut self, app: &App, event: Event) -> Option<bool> {
         match event {
             Event::Key(key) => match key.code {
                 KeyCode::Char('c') | KeyCode::Char('C') => {
                     if key.modifiers.contains(KeyModifiers::CONTROL) {
-                        return true;
+                        return Some(false);
                     }
                 }
                 KeyCode::Char('r') | KeyCode::Char('R') => {
                     if key.modifiers.contains(KeyModifiers::CONTROL) {
-                        app.peers.write().await.clear();
+                        // app.peers.write().await.clear();
+                        return Some(true);
                     }
                 }
                 KeyCode::Up if key.kind == KeyEventKind::Press => {
@@ -234,6 +238,6 @@ impl UiApp {
             },
             _ => {}
         };
-        false
+        None
     }
 }

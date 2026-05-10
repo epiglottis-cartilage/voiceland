@@ -1,7 +1,7 @@
 use crate::{
     Result,
     app::App,
-    codec::{self, Decoder, Encoder},
+    codec::{Decoder, Encoder},
     config::Config,
 };
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -44,7 +44,7 @@ impl AudioApp {
         let log_err = log_tx.clone();
         let mut sample_buffer: Vec<f32> = Vec::new();
 
-        let mut encoder = Encoder::new(config.denoise)?;
+        let mut encoder = Encoder::new(config.denoise, config.bitrate)?;
 
         let input_stream = input_device.build_input_stream(
             &input_config,
@@ -99,9 +99,6 @@ impl AudioApp {
 
         input_stream.play()?;
         output_stream.play()?;
-        log_tx
-            .send(format!("Audio initialized ({})", codec::config_summary()))
-            .await?;
 
         Ok(Self {
             _input_stream: input_stream,
@@ -111,13 +108,13 @@ impl AudioApp {
         })
     }
 
-    pub async fn run(&mut self, app: &App) {
+    pub async fn run(&mut self, app: &App) -> bool {
         let mut interval = tokio::time::interval(Duration::from_millis(FRAME_MS as _));
 
         loop {
-            if !app.running.load(std::sync::atomic::Ordering::Relaxed) {
-                break;
-            }
+            // if !app.running.load(std::sync::atomic::Ordering::Relaxed) {
+            //     break true;
+            // }
 
             interval.tick().await;
 
