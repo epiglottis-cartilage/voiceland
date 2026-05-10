@@ -62,11 +62,6 @@ impl AudioApp {
                     let v = volume.load(std::sync::atomic::Ordering::Relaxed) as f32 / 100.;
                     frame.iter_mut().for_each(|s| *s *= v);
 
-                    // println!(
-                    //     "record max {:?}",
-                    //     frame.iter().max_by(|x, y| x.abs().total_cmp(&y.abs()))
-                    // );
-
                     if let Ok(encoded) = encoder.encode(frame) {
                         let _ = record_tx.try_send(encoded.to_vec());
                     }
@@ -88,7 +83,7 @@ impl AudioApp {
             buffer_size: cpal::BufferSize::Default,
         };
 
-        let playback_buffer: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::new()));
+        let playback_buffer = Arc::new(Mutex::new(VecDeque::new()));
         let playback_buffer_clone = playback_buffer.clone();
 
         let log_err = log_tx.clone();
@@ -134,8 +129,7 @@ impl AudioApp {
             let mut mixed = vec![0.0f32; SAMPLES_PER_FRAME];
             let mut has_data = false;
 
-            let peers: tokio::sync::RwLockReadGuard<'_, Vec<crate::peer::Peer>> =
-                app.peers.read().await;
+            let peers = app.peers.read().await;
             for peer in peers.iter() {
                 if let Some(frame_bytes) = peer.try_pop_voice() {
                     has_data = true;
@@ -150,11 +144,6 @@ impl AudioApp {
                 }
             }
             drop(peers);
-
-            // println!(
-            //     "peer max {:?}",
-            //     mixed.iter().max_by(|x, y| x.abs().total_cmp(&y.abs()))
-            // );
 
             if has_data {
                 let mut pb = self.playback_buffer.lock().unwrap();

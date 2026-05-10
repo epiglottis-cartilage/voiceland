@@ -7,7 +7,7 @@ pub struct Peer {
     pub name: String,
     pub addr: SocketAddr,
     pub volume: AtomicU16,
-    voice: Mutex<VecDeque<Vec<u8>>>,
+    voice: Mutex<VecDeque<(u64, Vec<u8>)>>,
 }
 
 impl Peer {
@@ -20,15 +20,23 @@ impl Peer {
         }
     }
 
-    pub fn receive_voice(&self, data: Vec<u8>, ttl: u8) {
+    pub fn receive_voice(&self, seq: u64, data: Vec<u8>, ttl: u8) {
         let mut queue = self.voice.lock().unwrap();
-        queue.push_back(data);
+        if queue.back().map_or(true, |(lst_seq, _)| *lst_seq < seq) {
+            queue.push_back((seq, data));
+        } else {
+            if let Err(idx) = queue.binary_search_by_key(&seq, |(seq, _)| *seq) {
+                if idx > 0 || seq + 1 == queue[0].0 {
+                    queue.insert(idx, (seq, data));
+                }
+            }
+        }
         while queue.len() > ttl as usize {
             queue.pop_front();
         }
     }
 
     pub fn try_pop_voice(&self) -> Option<Vec<u8>> {
-        self.voice.lock().unwrap().pop_front()
+        self.voice.lock().unwrap().pop_front().map(|(_, data)| data)
     }
 }

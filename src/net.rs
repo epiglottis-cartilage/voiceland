@@ -9,6 +9,7 @@ pub struct NetApp {
     record_rx: mpsc::Receiver<Vec<u8>>,
     log_tx: mpsc::Sender<String>,
     buffer_len: u8,
+    seq: u64,
 }
 impl NetApp {
     const PREFIX: &'static [u8] = b"VLAND\n";
@@ -32,6 +33,7 @@ impl NetApp {
             record_rx,
             log_tx: tx,
             buffer_len: config.buffer_len as u8,
+            seq: 0,
         })
     }
 
@@ -41,13 +43,20 @@ impl NetApp {
             tokio::select! {
                 Some(voice_data) = self.record_rx.recv() => {
                     self.send_voice(&voice_data).await.unwrap();
+                    self.seq += 1;
                 },
                 result = self.socket.recv_from(&mut buf) => {
                     if let Ok((len, addr)) = result {
                         let data = &buf[..len];
-                        if data.starts_with(Self::PREFIX) {
-                            let name_len = data[Self::PREFIX.len()] as usize;
-                            let voice_data = data[Self::PREFIX.len() + 1 + name_len..].to_vec();
+                        if data.starts_with(Self::PREFIX) && len > Self::PREFIX.len() + 8 + 1 {
+
+                            let seq = u64::from_le_bytes(*data[Self::PREFIX.len()..].first_chunk().unwrap());
+                            let name_len = data[Self::PREFIX.len() + 8] as usize;
+
+                            let voice_data = match data.get(Self::PREFIX.len() + 8 + 1 + name_len..){
+                                Some(x) => x.to_vec(),
+                                None => continue,
+                            };
 
                             // if pear exist
                             let idx;
@@ -55,7 +64,7 @@ impl NetApp {
                                 let peers = app.peers.read().await;
                                 idx = peers.binary_search_by_key(&addr, |p| p.addr);
                                 if let Ok(idx) = idx {
-                                    peers[idx].receive_voice(voice_data, self.buffer_len);
+                                    peers[idx].receive_voice(seq, voice_data, self.buffer_len);
                                     continue;
                                 }
                             }
@@ -63,8 +72,8 @@ impl NetApp {
                                 let mut peers = app.peers.write().await;
                                 if let Err(idx) = idx {
                                     let name = String::from_utf8_lossy(
-                                                &data[Self::PREFIX.len() + 1
-                                                    ..Self::PREFIX.len() + 1 + name_len],
+                                                &data[Self::PREFIX.len() + 8 + 1
+                                                    ..Self::PREFIX.len() + 8 + 1 + name_len],
                                             ).to_string();
                                     self.log_tx.send(format!("New peer: {} ({})", name, addr)).await.unwrap();
                                     peers.insert(
@@ -75,8 +84,8 @@ impl NetApp {
                                         ),
                                     );
                                     self.add_peer(addr).await;
-                                    peers[idx].receive_voice(voice_data, self.buffer_len);
-                                }
+                                    peers[idx].receive_voice(seq, voice_data, self.buffer_len);
+                                }else{unreachable!()}
                             }
                         }
                     }
@@ -92,12 +101,14 @@ impl NetApp {
     }
 
     pub async fn send_voice(&mut self, voice_data: &[u8]) -> Result<()> {
-        let mut data =
-            Vec::with_capacity(Self::PREFIX.len() + 1 + self.local_name.len() + voice_data.len());
-        data.extend_from_slice(Self::PREFIX);
+        let mut data = Vec::with_capacity(
+            Self::PREFIX.len() + 8 + 1 + self.local_name.len() + voice_data.len(),
+        );
+        data.extend(Self::PREFIX);
+        data.extend(self.seq.to_le_bytes());
         data.push(self.local_name.len() as u8);
-        data.extend_from_slice(self.local_name.as_bytes());
-        data.extend_from_slice(voice_data);
+        data.extend(self.local_name.as_bytes());
+        data.extend(voice_data);
 
         for addr in &self.peers {
             self.socket.send_to(&data, addr).await?;
