@@ -3,3 +3,6 @@ buffer_len = 5
 denoise = true
 name = "-YOUR NAME-"
 peers = ["127.0.0.1"]
+
+# Optional
+microphone_volume = 200

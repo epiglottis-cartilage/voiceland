@@ -18,7 +18,7 @@ impl App {
     pub async fn new(config: Config) -> Result<(Self, (NetApp, UiApp, AudioApp))> {
         let (log_tx, log_rx) = tokio::sync::mpsc::channel(100);
         let (record_tx, record_rx) = tokio::sync::mpsc::channel(100);
-        let volume = Arc::new(AtomicU16::new(100));
+        let volume = Arc::new(AtomicU16::new(config.microphone_volume.unwrap_or(150)));
         let ui_app = UiApp::new(&config, log_rx);
         let net_app = NetApp::new(&config, log_tx.clone(), record_rx).await?;
         let audio_app = AudioApp::new(&config, log_tx.clone(), record_tx, volume.clone()).await?;
