@@ -3,14 +3,14 @@ use nnnoiseless::DenoiseState;
 use opus_rs::{Application, OpusDecoder, OpusEncoder};
 use std::mem::MaybeUninit;
 
-pub const SAMPLE_RATE: i32 = 48000;
+pub const SAMPLE_RATE: usize = 48000;
 pub const FRAME_MS: usize = 10;
-pub const BITRATE_BPS: i32 = 512000;
+pub const CHANNELS: usize = 1;
+const BITRATE_BPS: i32 = 512000;
 const USE_CBR: bool = false;
-const CHANNELS: usize = 1;
 const APPLICATION: Application = Application::Audio;
 
-pub const SAMPLES_PER_FRAME: usize = SAMPLE_RATE as usize * FRAME_MS / 1000;
+pub const SAMPLES_PER_FRAME: usize = SAMPLE_RATE * FRAME_MS / 1000;
 // assert_eq!(SAMPLES_PER_FRAME, 480);
 
 pub struct Encoder {
@@ -21,7 +21,7 @@ pub struct Encoder {
 
 impl Encoder {
     pub fn new(desoise: bool) -> Result<Self> {
-        let mut encoder = OpusEncoder::new(SAMPLE_RATE, CHANNELS, APPLICATION)?;
+        let mut encoder = OpusEncoder::new(SAMPLE_RATE as i32, CHANNELS, APPLICATION)?;
         encoder.bitrate_bps = BITRATE_BPS;
         encoder.use_cbr = USE_CBR;
         let denoiser = if desoise {
@@ -66,7 +66,7 @@ pub struct Decoder {
 
 impl Decoder {
     pub fn new() -> Result<Self> {
-        let decoder = OpusDecoder::new(SAMPLE_RATE, CHANNELS)?;
+        let decoder = OpusDecoder::new(SAMPLE_RATE as i32, CHANNELS)?;
 
         Ok(Self {
             decoder,

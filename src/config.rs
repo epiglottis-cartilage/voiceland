@@ -9,6 +9,7 @@ pub struct Config {
     pub peers: Vec<IpAddr>,
     pub buffer_len: u8,
     pub denoise: bool,
+    pub microphone_volume: Option<u16>,
 }
 
 impl Config {

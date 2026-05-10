@@ -12,12 +12,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-use crate::codec::{SAMPLE_RATE as CODEC_SAMPLE_RATE, SAMPLES_PER_FRAME as CODEC_SAMPLES};
-
-const SAMPLE_RATE: u32 = CODEC_SAMPLE_RATE as u32;
-const CHANNELS: u16 = 1;
-const FRAME_MS: u64 = 10;
-const SAMPLES_PER_FRAME: usize = CODEC_SAMPLES;
+use crate::codec::{CHANNELS, FRAME_MS, SAMPLE_RATE, SAMPLES_PER_FRAME};
 
 /// In/Out: opus data
 pub struct AudioApp {
@@ -41,8 +36,8 @@ impl AudioApp {
             .default_input_device()
             .ok_or("No default input device")?;
         let input_config = cpal::StreamConfig {
-            channels: CHANNELS,
-            sample_rate: SAMPLE_RATE.into(),
+            channels: CHANNELS as _,
+            sample_rate: SAMPLE_RATE as _,
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -78,8 +73,8 @@ impl AudioApp {
             .default_output_device()
             .ok_or("No default output device")?;
         let output_config = cpal::StreamConfig {
-            channels: CHANNELS,
-            sample_rate: SAMPLE_RATE.into(),
+            channels: CHANNELS as _,
+            sample_rate: SAMPLE_RATE as _,
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -117,7 +112,7 @@ impl AudioApp {
     }
 
     pub async fn run(&mut self, app: &App) {
-        let mut interval = tokio::time::interval(Duration::from_millis(FRAME_MS));
+        let mut interval = tokio::time::interval(Duration::from_millis(FRAME_MS as _));
 
         loop {
             if !app.running.load(std::sync::atomic::Ordering::Relaxed) {
