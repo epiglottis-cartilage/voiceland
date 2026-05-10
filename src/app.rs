@@ -1,7 +1,4 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, AtomicU16},
-};
+use std::sync::{Arc, atomic::AtomicU16};
 
 use crate::{Result, audio::AudioApp, config::Config, net::NetApp, peer::Peer, ui::UiApp};
 use tokio::sync::RwLock;
