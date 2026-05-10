@@ -180,7 +180,7 @@ impl UiApp {
 
     async fn handle_event(&mut self, app: &App, event: Event) -> Option<bool> {
         match event {
-            Event::Key(key) => match key.code {
+            Event::Key(key) if key.is_press() => match key.code {
                 KeyCode::Char('c') | KeyCode::Char('C') => {
                     if key.modifiers.contains(KeyModifiers::CONTROL) {
                         return Some(false);
