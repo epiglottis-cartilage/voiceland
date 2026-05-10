@@ -1,8 +1,12 @@
-use crate::{Result, app::App, codec::Codec};
+use crate::{
+    Result,
+    app::App,
+    codec::{self, Decoder, Encoder},
+    config::Config,
+};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::{
     collections::VecDeque,
-    iter::repeat,
     sync::{Arc, Mutex, atomic::AtomicU16},
     time::Duration,
 };
@@ -15,20 +19,21 @@ const CHANNELS: u16 = 1;
 const FRAME_MS: u64 = 10;
 const SAMPLES_PER_FRAME: usize = CODEC_SAMPLES;
 
+/// In/Out: opus data
 pub struct AudioApp {
     _input_stream: cpal::Stream,
     _output_stream: cpal::Stream,
     playback_buffer: Arc<Mutex<VecDeque<f32>>>,
-    codec: Arc<Mutex<Codec>>,
+    decoder: Decoder,
 }
 
 impl AudioApp {
     pub async fn new(
+        config: &Config,
         log_tx: mpsc::Sender<String>,
         record_tx: mpsc::Sender<Vec<u8>>,
         volume: Arc<AtomicU16>,
     ) -> Result<Self> {
-        let codec = Arc::new(Mutex::new(Codec::new()?));
         let host = cpal::default_host();
 
         // --- Input (microphone) ---
@@ -43,7 +48,8 @@ impl AudioApp {
 
         let log_err = log_tx.clone();
         let mut sample_buffer: Vec<f32> = Vec::new();
-        let codec_enc = codec.clone();
+
+        let mut encoder = Encoder::new(config.denoise)?;
 
         let input_stream = input_device.build_input_stream(
             &input_config,
@@ -51,14 +57,18 @@ impl AudioApp {
                 sample_buffer.extend_from_slice(data);
                 while sample_buffer.len() >= SAMPLES_PER_FRAME {
                     let mut frame: Vec<f32> = sample_buffer.drain(..SAMPLES_PER_FRAME).collect();
+                    let frame: &mut [f32; SAMPLES_PER_FRAME] = frame.first_chunk_mut().unwrap();
 
                     let v = volume.load(std::sync::atomic::Ordering::Relaxed) as f32 / 100.;
                     frame.iter_mut().for_each(|s| *s *= v);
 
-                    if let Ok(mut c) = codec_enc.lock() {
-                        if let Ok(encoded) = c.encode(&frame) {
-                            let _ = record_tx.try_send(encoded.to_vec());
-                        }
+                    // println!(
+                    //     "record max {:?}",
+                    //     frame.iter().max_by(|x, y| x.abs().total_cmp(&y.abs()))
+                    // );
+
+                    if let Ok(encoded) = encoder.encode(frame) {
+                        let _ = record_tx.try_send(encoded.to_vec());
                     }
                 }
             },
@@ -88,7 +98,7 @@ impl AudioApp {
                 let mut pb = playback_buffer_clone.lock().unwrap();
                 let len = data.len().min(pb.len());
                 data.iter_mut()
-                    .zip(pb.drain(..len).chain(repeat(0.0)))
+                    .zip(pb.drain(..len))
                     .for_each(|(d, p)| *d = p);
             },
             move |err| {
@@ -100,14 +110,14 @@ impl AudioApp {
         input_stream.play()?;
         output_stream.play()?;
         log_tx
-            .send(format!("Audio initialized ({})", Codec::config_summary()))
+            .send(format!("Audio initialized ({})", codec::config_summary()))
             .await?;
 
         Ok(Self {
             _input_stream: input_stream,
             _output_stream: output_stream,
             playback_buffer,
-            codec,
+            decoder: Decoder::new()?,
         })
     }
 
@@ -130,18 +140,21 @@ impl AudioApp {
                 if let Some(frame_bytes) = peer.try_pop_voice() {
                     has_data = true;
                     let volume =
-                        peer.volume.load(std::sync::atomic::Ordering::Relaxed) as f32 / 255.0;
+                        peer.volume.load(std::sync::atomic::Ordering::Relaxed) as f32 / 100.0;
 
-                    if let Ok(mut c) = self.codec.lock() {
-                        if let Ok(decoded) = c.decode(&frame_bytes) {
-                            for (i, sample) in decoded.iter().enumerate().take(SAMPLES_PER_FRAME) {
-                                mixed[i] += sample * volume;
-                            }
+                    if let Ok(decoded) = self.decoder.decode(&frame_bytes) {
+                        for (i, sample) in decoded.iter().enumerate().take(SAMPLES_PER_FRAME) {
+                            mixed[i] += sample * volume;
                         }
                     }
                 }
             }
             drop(peers);
+
+            // println!(
+            //     "peer max {:?}",
+            //     mixed.iter().max_by(|x, y| x.abs().total_cmp(&y.abs()))
+            // );
 
             if has_data {
                 let mut pb = self.playback_buffer.lock().unwrap();

@@ -6,10 +6,11 @@ description = "A voice communication binary for local area networks."
 
 [dependencies]
 # Async runtime
-tokio = { version = "1.44", features = ["full"] }
+tokio = { version = "1.52.3", features = ["full"] }
 
 # Audio
 cpal = "0.17.3"
+nnnoiseless = "0.5.2"
 
 # TUI
 ratatui = { version = "0.30" }

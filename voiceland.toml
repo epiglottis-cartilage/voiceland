@@ -1,4 +1,5 @@
-port = 6412
-name = "epiglottis"
-peers = ["10.161.1.42", "10.161.1.43", "127.0.0.1"]
+port = 6413
 buffer_len = 5
+denoise = true
+name = "-YOUR NAME-"
+peers = ["127.0.0.1"]
